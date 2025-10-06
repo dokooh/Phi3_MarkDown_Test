@@ -23,20 +23,19 @@ class PDFToMarkdownConverter:
         
         Args:
             model_name: Hugging Face model identifier
-            use_quantization: Whether to use 4-bit quantization
+            use_quantization: Whether to use 8-bit quantization
         """
         self.model_name = model_name
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"Using device: {self.device}")
         
-        # Load model with quantization
+        # Load model with 8-bit quantization
         print(f"Loading model: {model_name}")
         if use_quantization and self.device == "cuda":
             quantization_config = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_compute_dtype=torch.float16,
-                bnb_4bit_use_double_quant=True,
-                bnb_4bit_quant_type="nf4"
+                load_in_8bit=True,
+                llm_int8_threshold=6.0,
+                llm_int8_has_fp16_weight=False,
             )
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_name,
@@ -46,6 +45,7 @@ class PDFToMarkdownConverter:
                 torch_dtype=torch.float16,
                 _attn_implementation='eager'
             )
+            print("Model loaded with 8-bit quantization")
         else:
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_name,
@@ -53,6 +53,7 @@ class PDFToMarkdownConverter:
                 trust_remote_code=True,
                 torch_dtype=torch.float16 if self.device == "cuda" else torch.float32
             )
+            print("Model loaded without quantization")
         
         # Load processor
         self.processor = AutoProcessor.from_pretrained(
@@ -125,8 +126,6 @@ Output only the Markdown content without any explanations or preamble.<|end|>
                     do_sample=False,
                     temperature=0.0,
                     eos_token_id=self.processor.tokenizer.eos_token_id,
-                    use_cache=False,  # Disable cache to avoid DynamicCache issues
-                    pad_token_id=self.processor.tokenizer.eos_token_id,
                 )
             
             # Remove input tokens from generated output
@@ -201,7 +200,7 @@ Output only the Markdown content without any explanations or preamble.<|end|>
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Convert PDF documents to Markdown using Phi-3 Vision model"
+        description="Convert PDF documents to Markdown using Phi-3 Vision model with 8-bit quantization"
     )
     parser.add_argument(
         "pdf_path",
@@ -229,7 +228,7 @@ def main():
     parser.add_argument(
         "--no-quantization",
         action="store_true",
-        help="Disable 4-bit quantization (uses more memory)"
+        help="Disable 8-bit quantization (uses more memory but may improve quality)"
     )
     
     args = parser.parse_args()
