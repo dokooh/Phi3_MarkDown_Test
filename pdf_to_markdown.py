@@ -63,25 +63,39 @@ def parse_page_ranges(page_string):
 
 
 class PDFToMarkdownConverter:
-    def __init__(self, model_name="microsoft/Phi-3.5-vision-instruct", use_quantization=True):
+    def __init__(self, model_name="microsoft/Phi-3.5-vision-instruct", use_quantization=True, local_model_path=None, save_model_path=None):
         """
         Initialize the PDF to Markdown converter.
         
         Args:
             model_name: Hugging Face model identifier
             use_quantization: Whether to use 8-bit quantization
+            local_model_path: Path to local model directory (if exists)
+            save_model_path: Path to save model after download
         """
         print("DEBUG: Initializing PDFToMarkdownConverter...")
         print(f"DEBUG: Model name: {model_name}")
         print(f"DEBUG: Use quantization: {use_quantization}")
+        print(f"DEBUG: Local model path: {local_model_path}")
+        print(f"DEBUG: Save model path: {save_model_path}")
         
         self.model_name = model_name
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"DEBUG: CUDA available: {torch.cuda.is_available()}")
         print(f"DEBUG: Using device: {self.device}")
         
+        # Determine model source
+        model_source = local_model_path if local_model_path and os.path.exists(local_model_path) else model_name
+        is_local = local_model_path and os.path.exists(local_model_path)
+        
+        if is_local:
+            print(f"DEBUG: Loading model from local path: {local_model_path}")
+        else:
+            print(f"DEBUG: Loading model from Hugging Face: {model_name}")
+            if local_model_path:
+                print(f"DEBUG: Local path '{local_model_path}' not found, falling back to Hugging Face")
+        
         # Load model with 8-bit quantization
-        print(f"DEBUG: Loading model: {model_name}")
         if use_quantization and self.device == "cuda":
             print("DEBUG: Setting up 8-bit quantization config...")
             quantization_config = BitsAndBytesConfig(
@@ -91,33 +105,66 @@ class PDFToMarkdownConverter:
             )
             print("DEBUG: Loading model with quantization...")
             self.model = AutoModelForCausalLM.from_pretrained(
-                model_name,
+                model_source,
                 quantization_config=quantization_config,
                 device_map="auto",
                 trust_remote_code=True,
                 torch_dtype=torch.float16,
-                _attn_implementation='eager'
+                _attn_implementation='eager',
+                local_files_only=is_local
             )
             print("DEBUG: Model loaded with 8-bit quantization")
         else:
             print("DEBUG: Loading model without quantization...")
             self.model = AutoModelForCausalLM.from_pretrained(
-                model_name,
+                model_source,
                 device_map="auto",
                 trust_remote_code=True,
-                torch_dtype=torch.float16 if self.device == "cuda" else torch.float32
+                torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                local_files_only=is_local
             )
             print("DEBUG: Model loaded without quantization")
         
         # Load processor
         print("DEBUG: Loading processor...")
         self.processor = AutoProcessor.from_pretrained(
-            model_name,
-            trust_remote_code=True
+            model_source,
+            trust_remote_code=True,
+            local_files_only=is_local
         )
         
         print("DEBUG: Model and processor loaded successfully!")
+        
+        # Save model if requested and loaded from Hugging Face
+        if save_model_path and not is_local:
+            print(f"DEBUG: Saving model to local path: {save_model_path}")
+            self.save_model_locally(save_model_path)
+        
         print("DEBUG: Initialization complete.")
+    
+    def save_model_locally(self, save_path):
+        """
+        Save the model and processor to a local directory.
+        
+        Args:
+            save_path: Path to directory where model should be saved
+        """
+        try:
+            print(f"DEBUG: Creating save directory: {save_path}")
+            os.makedirs(save_path, exist_ok=True)
+            
+            print(f"DEBUG: Saving model to: {save_path}")
+            self.model.save_pretrained(save_path)
+            
+            print(f"DEBUG: Saving processor to: {save_path}")
+            self.processor.save_pretrained(save_path)
+            
+            print(f"DEBUG: Model and processor successfully saved to: {save_path}")
+            print(f"DEBUG: You can now use --local-model-path '{save_path}' to load from disk")
+            
+        except Exception as e:
+            print(f"ERROR: Failed to save model to {save_path}: {e}")
+            raise
     
     def extract_pages_as_images(self, pdf_path, dpi=200, page_numbers=None):
         """
@@ -347,6 +394,18 @@ def main():
         default=None,
         help="Specific pages to extract (e.g., '1-3,5,7-10' or 'all'). Default: all pages"
     )
+    parser.add_argument(
+        "--local-model-path",
+        type=str,
+        default=None,
+        help="Path to local model directory (if not provided, will download from Hugging Face)"
+    )
+    parser.add_argument(
+        "--save-model-path",
+        type=str,
+        default=None,
+        help="Path to save the model locally after download (for future use)"
+    )
     
     args = parser.parse_args()
     
@@ -361,7 +420,9 @@ def main():
     # Initialize converter
     converter = PDFToMarkdownConverter(
         model_name=args.model,
-        use_quantization=not args.no_quantization
+        use_quantization=not args.no_quantization,
+        local_model_path=args.local_model_path,
+        save_model_path=args.save_model_path
     )
     
     # Convert PDF
