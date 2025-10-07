@@ -126,6 +126,9 @@ Output only the Markdown content without any explanations or preamble.<|end|>
                     do_sample=False,
                     temperature=0.0,
                     eos_token_id=self.processor.tokenizer.eos_token_id,
+                    use_cache=False,  # Disable cache to avoid DynamicCache issues
+                    pad_token_id=self.processor.tokenizer.eos_token_id,
+                    past_key_values=None,  # Explicitly set past key values to None
                 )
             
             # Remove input tokens from generated output
